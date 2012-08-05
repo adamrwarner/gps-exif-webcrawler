@@ -145,12 +145,13 @@ class ExifGPSReader(object):
                 
                 if tag_id in self.GPS_TAGS:
                     
-                    # Get all the tag metadata.
+                    # Get all the tag's data.
                     tag = self.GPS_TAGS[tag_id]
                     datatype = self._val(stream.read(2))
-                    datatype_length = self.DATATYPE_LENGTHS[datatype]
+                    datatype_len = self.DATATYPE_LENGTHS[datatype]
                     num_values = self._val(stream.read(4)) 
-                    value_length = datatype_length * num_values
+                    value_length = datatype_len * num_values
+                    data = stream.read(4)
 
                     # For values over 4 bytes, the data gets stored
                     # later in the EXIF file. Values 4 bytes or under
@@ -163,23 +164,14 @@ class ExifGPSReader(object):
                         # stream. This is to accomodate the forward-only
                         # behavior I wanted in order to accomodate a
                         # bufferless stream.
-                        ifd_offsets[exif_start
-                            + self._val(stream.read(4))] = (tag,
-                                                           num_values,
-                                                           datatype)
+                        ifd_offsets[exif_start + self._val(data)] = (
+                            tag, num_values, datatype)
                     else:
-                        # We're assuming anything less than 4 bytes long
-                        # will only be a single value. This is a safe
-                        # assumption given the subset of GPS tags we are
-                        # interested in. That's why we just throw the
-                        # output from the stream into a list by itself
-                        # and pass it to our _get_value method.
-                        # More complicated handling may be required if
-                        # you expand this reader to handle other tags.
+                        # Split up the data string into its values. 
                         gps[tag] = self._get_value(
-                            [stream.read(4)[0 : value_length]],
-                            num_values,
-                            datatype)
+                            [data[i*datatype_len:(i+1)*datatype_len]
+                                for i in range(num_values)],
+                            num_values, datatype)
                 else:
                     # We don't recognize this tag? Skip it.
                     stream.read(10)
@@ -204,7 +196,7 @@ class ExifGPSReader(object):
                     # don't have to worry about zero-padding.
                     # Grab each of the values associated with this tag.
                     gps[tag] = self._get_value(
-                        [stream.read(datatype_length)
+                        [stream.read(datatype_len)
                             for i in range(num_values)],
                         num_values, datatype)
                         
@@ -217,15 +209,12 @@ class ExifGPSReader(object):
         Converts an array of hex strings to an array of values,
         or a single value if the array contains a single element.
         """
-        # If this is an ASCII value, then the number of values in this
-        # field corresponds to the number of characters in the string.
-        # The data array itself is a single-element array. Thus we have
-        # to handle ASCII strings quite differently from the other data
-        # types.
+        # ASCII values are a little bit of a special case.
+        # They need to have all their characters joined and have
+        # the null at the end removed.
         if datatype == self.ASCII_TAG:
-            # Pull the string from the single-element array and strip
-            # the null character at the end.
-            data = data[0][0:-1]
+            # Join the characters and strip the null at the end.
+            data = ''.join(data[0:-1])
             
         else:
             # Pick the appropriate evaluation function.
